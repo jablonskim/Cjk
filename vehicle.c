@@ -19,13 +19,13 @@ void sigint_handler(int sig)
     work = 0;
 }
 
-void moving()
-{
-}
-
-void *data_provider(void *arg)
+void *moving(void *arg)
 {
     return NULL;
+}
+
+void data_provider(int *x, int *y)
+{
 }
 
 int main(int argc, char **argv)
@@ -39,6 +39,7 @@ int main(int argc, char **argv)
     if(sethandler(sigint_handler, SIGINT))
         error_exit("Setting SIGINT handler:");
 
+    data_provider(&x, &y);
 
     return EXIT_SUCCESS;
 }
