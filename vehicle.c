@@ -8,11 +8,11 @@ volatile sig_atomic_t work = 1;
 
 struct vehicle_data_container
 {
-    int32_t x;
-    int32_t y;
+    int32_t *x;
+    int32_t *y;
     int step;
     //mutex
-}
+};
 
 void usage(const char *filename)
 {
@@ -30,8 +30,21 @@ void sigint_handler(int sig)
 
 void *moving(void *arg)
 {
-    int32_t *coordinates = (int32_t*)arg;
+    int x, y;
 
+    struct vehicle_data_container *vehicle_data = (struct vehicle_data_container*)arg;
+
+    while(work)
+    {
+        safe_sleep(vehicle_data->step);
+
+        x = rand() % (2 * MAX_STEP + 1) - MAX_STEP;
+        y = rand() % (2 * MAX_STEP + 1) - MAX_STEP;
+
+        // TODO: synchronizacja
+        *vehicle_data->x += x;
+        *vehicle_data->y += y;
+    }
 
     return NULL;
 }
@@ -42,7 +55,7 @@ void send_coordinates(int sockfd, int32_t *x, int32_t *y)
     int32_t buf[2];
     buf[0] = htonl(*x);
     buf[1] = htonl(*y);
-    socket_write(sockfd, buf, 2 * sizeof(int32_t));
+    socket_write(sockfd, (char*)buf, 2 * sizeof(int32_t));
 }
 
 void data_provider(int32_t *x, int32_t *y, int16_t port)
@@ -54,7 +67,7 @@ void data_provider(int32_t *x, int32_t *y, int16_t port)
 
     while(work)
     {
-        socket = 0;
+        ssocket = 0;
         while(work && (ssocket = accept(sockfd, NULL, NULL)) < 0)
         {
             if(errno == EINTR)
@@ -66,7 +79,7 @@ void data_provider(int32_t *x, int32_t *y, int16_t port)
         if(work)
             send_coordinates(ssocket, x, y);
 
-        if(socket != 0 && TEMP_FAILURE_RETRY(close(ssocket)) < 0)
+        if(ssocket != 0 && TEMP_FAILURE_RETRY(close(ssocket)) < 0)
             error_exit("Closing socket:");
     }
 
@@ -82,7 +95,11 @@ void vehicle_work(int port, int step)
     coordinates[1] = (rand() % (2 * Y_COORD_LIMIT + 1)) - Y_COORD_LIMIT;
 
     // TODO: thread
-    // moving(coordinates)
+    struct vehicle_data_container vehicle_data;
+    vehicle_data.x = &coordinates[0];
+    vehicle_data.y = &coordinates[1];
+    vehicle_data.step = step;
+    // moving(&vehicle_data)
     data_provider(&coordinates[0], &coordinates[1], (int16_t)port);
     printf("Oczekiwanie na zamkniecie...\n");
     // TODO: join
@@ -99,7 +116,7 @@ int main(int argc, char **argv)
     step = atoi(argv[2]);
 
     if(port <= 0 || step <= 0)
-        usage();
+        usage(argv[0]);
 
     srand(time(NULL) ^ getpid());
 
