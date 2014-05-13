@@ -31,19 +31,19 @@ void register_vehicle(int fd, int nump, char **params)
     uint32_t data_size, id;
     char status;
     
-    if(nump != 2 || (iport = atoi(params[0])) <= 0)
+    if(nump != 2 || (iport = atoi(params[1])) <= 0)
     {
         socket_close(fd);
         usage("client");
     }
 
     port = htons((uint16_t)iport);
-    data_size = htonl(strlen(params[1]));
+    data_size = htonl(strlen(params[0]));
 
     if(socket_write(fd, "r", 1) != 1) error_exit("Sending data:");
     if(socket_write(fd, &port, sizeof(uint16_t)) != sizeof(uint16_t)) error_exit("Sending data:");
     if(socket_write(fd, &data_size, sizeof(uint32_t)) != sizeof(uint32_t)) error_exit("Sending data:");
-    if(socket_write(fd, params[1], strlen(params[1])) != strlen(params[1])) error_exit("Sending data:");
+    if(socket_write(fd, params[0], strlen(params[0])) != strlen(params[0])) error_exit("Sending data:");
 
     if(socket_read(fd, &status, 1) != 1) error_exit("Receiving data:");
     if(status != 'k') {
@@ -80,14 +80,76 @@ void delete_vehicle(int fd, int nump, char **params)
 
 void get_history(int fd, int nump, char **params)
 {
+    uint32_t id, count;
+    int32_t coords[2];
+    int i;
+
+    if(nump != 1 || (id = atoi(params[0])) <= 0)
+    {
+        socket_close(fd);
+        usage("client");
+    }
+
+    id = htonl(id);
+
+    if(socket_write(fd, "h", 1) != 1) error_exit("Sending data:");
+    if(socket_write(fd, &id, sizeof(uint32_t)) != sizeof(uint32_t)) error_exit("Sending data:");
+
+    if(socket_read(fd, &count, sizeof(uint32_t)) != sizeof(uint32_t)) error_exit("Receiving data:");
+    count = ntohl(count);
+    printf("W historii pojazdu %d jest %d lokacji:\n", ntohl(id), count);
+
+    for(i = 0; i < count; ++i)
+    {
+        if(socket_read(fd, coords, 2 * sizeof(int32_t)) != sizeof(int32_t)) error_exit("Receiving data:");
+        printf("[%d; %d]\n", ntohl(coords[0]), ntohl(coords[1]));
+    }
 }
 
 void calculate_distance(int fd, int nump, char **params)
 {
+    uint32_t id;
+
+    if(socket_write(fd, "t", 1) != 1) error_exit("Sending data:");
+
+    if(socket_read(fd, &id, sizeof(uint32_t)) != sizeof(uint32_t)) error_exit("Receiving data:");
+    id = ntohl(id);
+
+    printf("Status ID = %d\n", id);
 }
 
 void check_status(int fd, int nump, char **params)
 {
+    int id;
+    uint32_t iid;
+    char status;
+
+    if(nump != 1 || (id = atoi(params[0])) <= 0)
+        usage("client");
+
+    iid = htonl(id);
+
+    if(socket_write(fd, "s", 1) != 1) error_exit("Sending data:");
+    if(socket_write(fd, &iid, sizeof(uint32_t)) != sizeof(uint32_t)) error_exit("Sending data:");
+
+    if(socket_read(fd, &status, 1) != 1) error_exit("Receiving data:");
+
+    switch(status)
+    {
+        case 'o':
+            printf("Trwaja obliczenia, sprobuj pozniej.\n");
+            break;
+
+        case 'd':
+            if(socket_read(fd, &iid, sizeof(uint32_t)) != sizeof(uint32_t)) error_exit("Receiving data:");
+            iid = ntohl(iid);
+            printf("Najdluzsza trase przejechal pojazd %d.\n", iid);
+            break;
+
+        default:
+            printf("Blad! Nie mozna odebrac statusu dla ID = %d\n", id);
+            break;
+    }
 }
 
 void client_work(char command, char *server_addr, uint16_t port, int nump, char **params)

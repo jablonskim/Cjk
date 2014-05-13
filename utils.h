@@ -1,3 +1,6 @@
+#ifndef _UTILS_H
+#define _Utils_H
+
 #define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
@@ -23,3 +26,4 @@ ssize_t socket_read(int fd, void *_buf, size_t count);
 void socket_connect(int fd, char *hostname, uint16_t port);
 void socket_close(int fd);
 
+#endif
