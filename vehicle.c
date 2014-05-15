@@ -11,7 +11,7 @@ struct vehicle_data_container
     int32_t *x;
     int32_t *y;
     int step;
-    //mutex
+    pthread_mutex_t mutex;
 };
 
 void usage(const char *filename)
@@ -41,24 +41,27 @@ void *moving(void *arg)
         x = rand() % (2 * MAX_STEP + 1) - MAX_STEP;
         y = rand() % (2 * MAX_STEP + 1) - MAX_STEP;
 
-        // TODO: synchronizacja
+        t_check_error(pthread_mutex_lock(&(vehicle_data->mutex)));
         *vehicle_data->x += x;
         *vehicle_data->y += y;
+        printf("Nowa lokacja: [%d; %d]\n", *vehicle_data->x, *vehicle_data->y);
+        t_check_error(pthread_mutex_unlock(&(vehicle_data->mutex)));
     }
 
     return NULL;
 }
 
-void send_coordinates(int sockfd, int32_t *x, int32_t *y)
+void send_coordinates(int sockfd, int32_t *x, int32_t *y, pthread_mutex_t *mutex)
 {
-    // TODO: sync
     int32_t buf[2];
+    t_check_error(pthread_mutex_lock(mutex));
     buf[0] = htonl(*x);
     buf[1] = htonl(*y);
+    t_check_error(pthread_mutex_unlock(mutex));
     socket_write(sockfd, (char*)buf, 2 * sizeof(int32_t));
 }
 
-void data_provider(int32_t *x, int32_t *y, int16_t port)
+void data_provider(int32_t *x, int32_t *y, int16_t port, pthread_mutex_t *mutex)
 {
     int sockfd, ssocket;
 
@@ -77,9 +80,9 @@ void data_provider(int32_t *x, int32_t *y, int16_t port)
         }
 
         if(work)
-            send_coordinates(ssocket, x, y);
+            send_coordinates(ssocket, x, y, mutex);
 
-        if(ssocket != 0 && TEMP_FAILURE_RETRY(close(ssocket)) < 0)
+        if(ssocket > 0 && TEMP_FAILURE_RETRY(close(ssocket)) < 0)
             error_exit("Closing socket:");
     }
 
@@ -90,19 +93,22 @@ void data_provider(int32_t *x, int32_t *y, int16_t port)
 void vehicle_work(int port, int step)
 {
     int32_t coordinates[2];
+    pthread_t bgthread;
 
     coordinates[0] = (rand() % (2 * X_COORD_LIMIT + 1)) - X_COORD_LIMIT;
     coordinates[1] = (rand() % (2 * Y_COORD_LIMIT + 1)) - Y_COORD_LIMIT;
 
-    // TODO: thread
     struct vehicle_data_container vehicle_data;
     vehicle_data.x = &coordinates[0];
     vehicle_data.y = &coordinates[1];
     vehicle_data.step = step;
-    // moving(&vehicle_data)
-    data_provider(&coordinates[0], &coordinates[1], (int16_t)port);
+    t_check_error(pthread_mutex_init(&(vehicle_data.mutex), NULL));
+    
+    t_check_error(pthread_create(&bgthread, NULL, moving, &vehicle_data));
+    data_provider(&coordinates[0], &coordinates[1], (int16_t)port, &(vehicle_data.mutex));
     printf("Oczekiwanie na zamkniecie...\n");
-    // TODO: join
+    t_check_error(pthread_join(bgthread, NULL));
+    t_check_error(pthread_mutex_destroy(&(vehicle_data.mutex)));
 }
 
 int main(int argc, char **argv)

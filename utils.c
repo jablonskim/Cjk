@@ -1,5 +1,17 @@
 #include "utils.h"
 
+void t_check_error(int errnum)
+{
+    char buf[256];
+
+    if(errnum == 0)
+        return;
+
+    strerror_r(errnum, buf, 255);
+    fprintf(stderr, "Threads: %s\n", buf);
+    exit(EXIT_FAILURE);
+}
+
 void error_exit(const char *msg)
 {
     perror(msg);

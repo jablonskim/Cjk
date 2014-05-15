@@ -11,11 +11,13 @@
 #include <stdint.h>
 #include <errno.h>
 #include <netdb.h>
+#include <pthread.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
 
 void error_exit(const char *msg);
+void t_check_error(int errnum);
 int sethandler(void (*f)(int), int sig);
 int make_socket(int type);
 int make_and_bind_socket(uint16_t port, int type);
