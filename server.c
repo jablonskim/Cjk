@@ -1,20 +1,8 @@
 #include "utils.h"
 #include "vehicle_list.h"
+#include "server.h"
 
 volatile sig_atomic_t work = 1;
-
-struct background_work_data
-{
-    int step;
-    struct vehicle_list *list;
-};
-
-struct get_coords_data
-{
-    struct vehicle_list *list;
-    pthread_t thread;
-    pthread_mutex_t mutex;
-};
 
 void sigint_handler(int sig)
 {
@@ -54,11 +42,8 @@ void *collect_coordinates(void *data)
         v = get_next_vehicle(d->list, v);
     }
 
-    t_check_error(pthread_mutex_lock(&d->mutex));
-    t_check_error(pthread_mutex_unlock(&d->mutex));
-    t_check_error(pthread_mutex_destroy(&d->mutex));
-
-    free(d);
+    stop_detached_thread(&d->mutex, d);
+    
     return NULL;
 }
 
@@ -71,22 +56,14 @@ void *background_work(void *data)
 
     while(work)
     {
-        safe_sleep(bgwd->step);
+        safe_sleep(bgwd->step, NULL);
 
         cd = malloc(sizeof(struct get_coords_data));
         if(cd == NULL)
             error_exit("Allocating memory:");
-
-        t_check_error(pthread_mutex_init(&cd->mutex, NULL));
-        t_check_error(pthread_mutex_lock(&cd->mutex));
-
-        t_check_error(pthread_attr_init(&t_attr));
-        t_check_error(pthread_attr_setdetachstate(&t_attr, PTHREAD_CREATE_DETACHED));
         cd->list = bgwd->list;
-        t_check_error(pthread_create(&cd->thread, &t_attr, collect_coordinates, cd));
-        t_check_error(pthread_attr_destroy(&t_attr));
 
-        t_check_error(pthread_mutex_unlock(&cd->mutex));
+        start_detached_thread(&cd->mutex, &t_attr, &cd->thread, collect_coordinates, cd);
     }
 
     return NULL;
@@ -138,72 +115,149 @@ void delete_vehicle(int fd, struct vehicle_list *vehicles)
             "Pojazd %d nie zostal usuniety. Count = %d\n", id, vehicles->num_vehicles);
 }
 
-void get_history(int fd)
+void get_history(int fd, struct vehicle_list *vehicles)
 {
+    int32_t id, count, x, y;
+    struct single_vehicle *v;
+    struct position *p;
+
+    if(socket_read(fd, &id, sizeof(uint32_t)) != sizeof(uint32_t)) return;
+    id = ntohl(id);
+
+    count = begin_getting_history(vehicles, id, &v);
+    count = htonl(count);
+    
+    if(socket_write(fd, &count, sizeof(uint32_t)) == sizeof(uint32_t) && v != NULL)
+    {
+        p = get_positions(v);
+        
+        while(p != NULL)
+        {
+            x = htonl(p->x);
+            y = htonl(p->y);
+
+            if(socket_write(fd, &x, sizeof(int32_t)) != sizeof(int32_t)) break;
+            if(socket_write(fd, &y, sizeof(int32_t)) != sizeof(int32_t)) break;
+              
+            p = get_next_position(p);
+        }
+    }
+
+    end_getting_history(vehicles, v);
 }
 
-void calculate_distance(int fd)
+void *calculate_distance_bg(void *data)
 {
+    struct calculate_distance_data *d = (struct calculate_distance_data*)data;
+
+    l_calculate_distance(d->vehicles, d->id);
+    stop_detached_thread(&d->mutex, d);
+
+    return NULL;
 }
 
-void check_status(int fd)
+void calculate_distance(int fd, struct vehicle_list *vehicles)
 {
+    uint32_t id;
+    pthread_attr_t t_attr;
+    struct calculate_distance_data *data;
+
+    data = (struct calculate_distance_data*)malloc(sizeof(struct calculate_distance_data));
+    if(data == NULL)
+        error_exit("Allocating memory:");
+
+    data->vehicles = vehicles;
+    id = add_new_calculation(vehicles);
+    data->id = id;
+    id = htonl(id);
+
+    if(socket_write(fd, &id, sizeof(uint32_t)) == sizeof(uint32_t))
+        start_detached_thread(&data->mutex, &t_attr, &data->thread, calculate_distance_bg, data);
+    else
+        free(data);
 }
 
-void accept_connection(int fd, struct vehicle_list *vehicles)
+void check_status(int fd, struct vehicle_list *vehicles)
+{
+    uint32_t id, winner;
+    char status;
+
+    if(socket_read(fd, &id, sizeof(uint32_t)) != sizeof(uint32_t)) return;
+    id = ntohl(id);
+
+    status = get_calculation_status(vehicles, id, &winner);
+    if(socket_write(fd, &status, 1) != 1) return;
+    
+    if(status == 'd')
+    {
+        winner = htonl(winner);
+        socket_write(fd, &winner, sizeof(uint32_t));
+    }
+}
+
+void *accept_connection(void *data)
 {
     char command;
+    struct accept_connection_data *d = (struct accept_connection_data*)data;
 
-    if(socket_read(fd, &command, 1) == 1)
+    if(socket_read(d->fd, &command, 1) == 1)
     {
         switch(command)
         {
             case 'r':
-                register_vehicle(fd, vehicles);
+                register_vehicle(d->fd, d->vehicles);
                 break;
-
             case 'd':
-                delete_vehicle(fd, vehicles);
+                delete_vehicle(d->fd, d->vehicles);
                 break;
-
             case 'h':
-                get_history(fd);
+                get_history(d->fd, d->vehicles);
                 break;
-
             case 't':
-                calculate_distance(fd);
+                calculate_distance(d->fd, d->vehicles);
                 break;
-
             case 's':
-                check_status(fd);
+                check_status(d->fd, d->vehicles);
                 break;
         }
     }
 
-    socket_close(fd);
+    socket_close(d->fd);
+    stop_detached_thread(&d->mutex, d);    
+
+    return NULL;
 }
 
 void wait_for_connections(uint16_t port, struct vehicle_list *vehicles)
 {
-    int sockfd, fd;
-    //pthread_t thread;
+    int sockfd;
+    struct accept_connection_data *data;
+    pthread_attr_t t_attr;
 
+    t_sigmask(SIGINT, SIG_UNBLOCK);
     sockfd = make_and_bind_socket(port, SOCK_STREAM);
     socket_listen(sockfd, 16);
 
     while(work)
     {
-        fd = 0;
-        while(work && (fd = accept(sockfd, NULL, NULL)) < 0)
+        data = (struct accept_connection_data*)malloc(sizeof(struct accept_connection_data));
+        if(data == NULL) error_exit("Memory allocation:");
+        data->fd = 0;
+        data->vehicles = vehicles;
+        
+        while(work && (data->fd = accept(sockfd, NULL, NULL)) < 0)
         {
             if(errno == EINTR)
                 continue;
-
             error_exit("Accepting connection:");
         }
 
-        if(fd > 0)
-            accept_connection(fd, vehicles);
+        t_sigmask(SIGINT, SIG_BLOCK);
+        if(data->fd > 0)
+            start_detached_thread(&data->mutex, &t_attr, &data->thread, accept_connection, data);
+        else
+            free(data);
+        t_sigmask(SIGINT, SIG_UNBLOCK);
     }
 
     socket_close(sockfd);
@@ -223,6 +277,7 @@ void server_work(uint16_t port, int timestep)
     t_check_error(pthread_create(&bgthread, NULL, background_work, &bgwd));
     wait_for_connections(port, &vehicles);
 
+    printf("Oczekiwanie na zamkniecie...\n");
     t_check_error(pthread_join(bgthread, NULL));
     free_vehicles_list(&vehicles);
 }
@@ -244,6 +299,8 @@ int main(int argc, char **argv)
         error_exit("Setting SIGPIPE handler:");
     if(sethandler(sigint_handler, SIGINT))
         error_exit("Setting SIGINT handler:");
+
+    t_sigmask(SIGINT, SIG_BLOCK);
 
     server_work((uint16_t)port, timestep);
 

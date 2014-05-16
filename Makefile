@@ -1,6 +1,6 @@
 CC=gcc
-C_FLAGS=-Wall -g
-L_FLAGS=-lpthread
+C_FLAGS=-Wall -Werror -ansi -pedantic -g
+L_FLAGS=-lpthread -lm
 
 .PHONY: all clean
 
@@ -18,10 +18,10 @@ vehicle: vehicle.o utils.o
 client.o: client.c utils.h
 	${CC} -o client.o -c client.c ${C_FLAGS}
 
-server.o: server.c utils.h vehicle_list.h
+server.o: server.c utils.h vehicle_list.h server.h
 	${CC} -o server.o -c server.c ${C_FLAGS}
 
-vehicle.o: vehicle.c utils.h
+vehicle.o: vehicle.c utils.h vehicle.h
 	${CC} -o vehicle.o -c vehicle.c ${C_FLAGS}
 
 utils.o: utils.c utils.h

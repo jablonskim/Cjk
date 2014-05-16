@@ -1,18 +1,11 @@
 #include "utils.h"
+#include "vehicle.h"
 
 #define X_COORD_LIMIT 9000
 #define Y_COORD_LIMIT 18000
 #define MAX_STEP 2
 
 volatile sig_atomic_t work = 1;
-
-struct vehicle_data_container
-{
-    int32_t *x;
-    int32_t *y;
-    int step;
-    pthread_mutex_t mutex;
-};
 
 void usage(const char *filename)
 {
@@ -36,7 +29,7 @@ void *moving(void *arg)
 
     while(work)
     {
-        safe_sleep(vehicle_data->step);
+        safe_sleep(vehicle_data->step, NULL);
 
         x = rand() % (2 * MAX_STEP + 1) - MAX_STEP;
         y = rand() % (2 * MAX_STEP + 1) - MAX_STEP;
@@ -65,6 +58,7 @@ void data_provider(int32_t *x, int32_t *y, int16_t port, pthread_mutex_t *mutex)
 {
     int sockfd, ssocket;
 
+    t_sigmask(SIGINT, SIG_UNBLOCK);
     sockfd = make_and_bind_socket(port, SOCK_STREAM);
     socket_listen(sockfd, 1);
 
@@ -94,11 +88,11 @@ void vehicle_work(int port, int step)
 {
     int32_t coordinates[2];
     pthread_t bgthread;
-
+    struct vehicle_data_container vehicle_data;
+    
     coordinates[0] = (rand() % (2 * X_COORD_LIMIT + 1)) - X_COORD_LIMIT;
     coordinates[1] = (rand() % (2 * Y_COORD_LIMIT + 1)) - Y_COORD_LIMIT;
 
-    struct vehicle_data_container vehicle_data;
     vehicle_data.x = &coordinates[0];
     vehicle_data.y = &coordinates[1];
     vehicle_data.step = step;
@@ -130,6 +124,8 @@ int main(int argc, char **argv)
         error_exit("Setting SIGPIPE handler:");
     if(sethandler(sigint_handler, SIGINT))
         error_exit("Setting SIGINT handler:");
+
+    t_sigmask(SIGINT, SIG_BLOCK);
 
     vehicle_work(port, step);
 

@@ -101,7 +101,7 @@ void get_history(int fd, int nump, char **params)
 
     for(i = 0; i < count; ++i)
     {
-        if(socket_read(fd, coords, 2 * sizeof(int32_t)) != sizeof(int32_t)) error_exit("Receiving data:");
+        if(socket_read(fd, coords, 2 * sizeof(int32_t)) != 2 * sizeof(int32_t)) error_exit("Receiving data:");
         printf("[%d; %d]\n", ntohl(coords[0]), ntohl(coords[1]));
     }
 }

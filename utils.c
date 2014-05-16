@@ -12,16 +12,73 @@ void t_check_error(int errnum)
     exit(EXIT_FAILURE);
 }
 
+void t_start_reading(pthread_mutex_t *pmutex, int *prt)
+{
+    t_check_error(pthread_mutex_lock(pmutex));
+    (*prt)++;
+    t_check_error(pthread_mutex_unlock(pmutex));
+}
+
+void t_stop_reading(pthread_mutex_t *pmutex, pthread_cond_t *pcond, int *prt)
+{
+    t_check_error(pthread_mutex_lock(pmutex));
+    (*prt)--;
+    t_check_error(pthread_cond_broadcast(pcond));
+    t_check_error(pthread_mutex_unlock(pmutex));
+}
+
+void t_start_writing(pthread_mutex_t *pmutex, pthread_cond_t *pcond, int *prt)
+{
+    t_check_error(pthread_mutex_lock(pmutex));
+    while(*prt != 0)
+        t_check_error(pthread_cond_wait(pcond, pmutex));
+}
+
+void t_sigmask(int signum, int how)
+{
+    sigset_t set;
+
+    sigemptyset(&set);
+    sigaddset(&set, signum);
+    t_check_error(pthread_sigmask(how, &set, NULL));
+}
+
+void t_stop_writing(pthread_mutex_t *pmutex)
+{
+    t_check_error(pthread_mutex_unlock(pmutex));
+}
+
+void start_detached_thread(pthread_mutex_t *mutex, pthread_attr_t *t_attr, 
+        pthread_t *thread, void *(*func)(void*), void *params)
+{
+    t_check_error(pthread_mutex_init(mutex, NULL));
+    t_check_error(pthread_mutex_lock(mutex));
+    t_check_error(pthread_attr_init(t_attr));
+    t_check_error(pthread_attr_setdetachstate(t_attr, PTHREAD_CREATE_DETACHED));
+    t_check_error(pthread_create(thread, t_attr, func, params));
+    t_check_error(pthread_attr_destroy(t_attr));
+    t_check_error(pthread_mutex_unlock(mutex));  
+}
+
+void stop_detached_thread(pthread_mutex_t *mutex, void *d)
+{
+    t_check_error(pthread_mutex_lock(mutex));
+    t_check_error(pthread_mutex_unlock(mutex));
+    t_check_error(pthread_mutex_destroy(mutex));
+
+    free(d);
+}
+
 void error_exit(const char *msg)
 {
     perror(msg);
     exit(EXIT_FAILURE);
 }
 
-void safe_sleep(int seconds)
+void safe_sleep(int seconds, int *pwork)
 {
     int tt;
-    for(tt = seconds; tt > 0; tt = sleep(tt));
+    for(tt = seconds; (!pwork || *pwork) && tt > 0; tt = sleep(tt));
 }
 
 ssize_t socket_write(int fd, void *_buf, size_t count)
@@ -78,11 +135,13 @@ void socket_close(int fd)
 void socket_connect(int fd, char *hostname, uint16_t port)
 {
     struct sockaddr_in saddr;
-    struct hostent *hostinfo;
+    struct hostent *hostinfo, hostinfo_t;
+    char buf[512];
+    int err;
 
-    if((hostinfo = gethostbyname(hostname)) == NULL)
+    if(gethostbyname_r(hostname, &hostinfo_t, buf, 511, &hostinfo, &err) || hostinfo == NULL)
     {
-        fprintf(stderr, "Gethostbyname error.\n");
+        fprintf(stderr, "Gethostbyname error %d.\n", err); 
         exit(EXIT_FAILURE);
     }
 
@@ -91,7 +150,7 @@ void socket_connect(int fd, char *hostname, uint16_t port)
     saddr.sin_port = htons(port);
     saddr.sin_addr = *(struct in_addr*)hostinfo->h_addr;
 
-    if(connect(fd, (struct sockaddr*)&saddr, sizeof(struct sockaddr_in)) < 0)
+    if(TEMP_FAILURE_RETRY(connect(fd, (struct sockaddr*)&saddr, sizeof(struct sockaddr_in))) < 0)
         error_exit("Connecting to server:");
 }
 
