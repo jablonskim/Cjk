@@ -132,7 +132,7 @@ void socket_close(int fd)
         error_exit("Closing socket:");
 }
 
-void socket_connect(int fd, char *hostname, uint16_t port)
+int socket_connect_safe(int fd, char *hostname, uint16_t port)
 {
     struct sockaddr_in saddr;
     struct hostent *hostinfo, hostinfo_t;
@@ -140,10 +140,7 @@ void socket_connect(int fd, char *hostname, uint16_t port)
     int err;
 
     if(gethostbyname_r(hostname, &hostinfo_t, buf, 511, &hostinfo, &err) || hostinfo == NULL)
-    {
-        fprintf(stderr, "Gethostbyname error %d.\n", err); 
-        exit(EXIT_FAILURE);
-    }
+        return 1;
 
     memset(&saddr, 0, sizeof(struct sockaddr_in));
     saddr.sin_family = AF_INET;
@@ -151,6 +148,14 @@ void socket_connect(int fd, char *hostname, uint16_t port)
     saddr.sin_addr = *(struct in_addr*)hostinfo->h_addr;
 
     if(TEMP_FAILURE_RETRY(connect(fd, (struct sockaddr*)&saddr, sizeof(struct sockaddr_in))) < 0)
+        return 1;
+
+    return 0;
+}
+
+void socket_connect(int fd, char *hostname, uint16_t port)
+{
+    if(socket_connect_safe(fd, hostname, port))
         error_exit("Connecting to server:");
 }
 

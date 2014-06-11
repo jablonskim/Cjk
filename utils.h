@@ -27,6 +27,7 @@ void safe_sleep(int seconds, int *pwork);
 ssize_t socket_write(int fd, void *buf, size_t count);
 ssize_t socket_read(int fd, void *_buf, size_t count);
 void socket_connect(int fd, char *hostname, uint16_t port);
+int socket_connect_safe(int fd, char *hostname, uint16_t port);
 void socket_close(int fd);
 void start_detached_thread(pthread_mutex_t *mutex, pthread_attr_t *t_attr, pthread_t *thread, void *(*func)(void*), void *params);
 void stop_detached_thread(pthread_mutex_t *mutex, void *d);

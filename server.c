@@ -30,14 +30,13 @@ void *collect_coordinates(void *data)
     while(v)
     {
         fd = make_socket(SOCK_STREAM);
-        socket_connect(fd, v->addr, v->port);
+        if(!socket_connect_safe(fd, v->addr, v->port))
+        {    
+            if(socket_read(fd, coords, 2 * sizeof(int32_t)) == 2 * sizeof(int32_t))
+                add_coords(ntohl(coords[0]), ntohl(coords[1]), v);
 
-        if(socket_read(fd, coords, 2 * sizeof(int32_t)) == 2 * sizeof(int32_t))
-        {
-            add_coords(ntohl(coords[0]), ntohl(coords[1]), v);
+            TEMP_FAILURE_RETRY(close(fd));
         }
-
-        socket_close(fd);
 
         v = get_next_vehicle(d->list, v);
     }
@@ -222,7 +221,7 @@ void *accept_connection(void *data)
         }
     }
 
-    socket_close(d->fd);
+    TEMP_FAILURE_RETRY(close(d->fd));
     stop_detached_thread(&d->mutex, d);    
 
     return NULL;
